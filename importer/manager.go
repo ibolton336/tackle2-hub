@@ -2,6 +2,7 @@ package importer
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	liberr "github.com/konveyor/controller/pkg/error"
 	"github.com/konveyor/tackle2-hub/api"
@@ -106,7 +107,21 @@ func (m *Manager) createDependency(imp *model.Import) (ok bool) {
 // createApplication creates an application from an
 // application import record.
 func (m *Manager) createApplication(imp *model.Import) (ok bool) {
-	app := &model.Application{}
+	app := &model.Application{
+		Name:        imp.ApplicationName,
+		Description: imp.Description,
+		Comments:    imp.Comments,
+		Binary:      imp.Binary,
+	}
+	repository := api.Repository{
+		Kind:   imp.RepositoryKind,
+		URL:    imp.RepositoryURL,
+		Branch: imp.RepositoryBranch,
+		Tag:    imp.RepositoryTag,
+		Path:   imp.RepositoryPath,
+	}
+	app.Repository, _ = json.Marshal(repository)
+
 	businessService := &model.BusinessService{}
 	result := m.DB.Select("id").Where("name LIKE ?", imp.BusinessService).First(businessService)
 	if result.Error != nil {
@@ -114,14 +129,18 @@ func (m *Manager) createApplication(imp *model.Import) (ok bool) {
 		return
 	}
 	app.BusinessService = businessService
-	app.Name = imp.ApplicationName
-	app.Description = imp.Description
-	app.Comments = imp.Comments
+
+	identity := &model.Identity{}
+	result = m.DB.Where("name LIKE ? AND kind LIKE ?", imp.IdentityName, imp.IdentityKind).First(identity)
+	if result.Error != nil {
+		imp.ErrorMessage = fmt.Sprintf("Identity '%s' of kind '%s' could not be found.", imp.IdentityName, imp.IdentityKind)
+		return
+	}
+	app.Identities = append(app.Identities, *identity)
 
 	tags := []model.Tag{}
 	db := m.DB.Preload("TagType")
 	db.Find(&tags)
-
 	for _, impTag := range imp.ImportTags {
 		for _, tag := range tags {
 			if tag.Name == impTag.Name && tag.TagType.Name == impTag.TagType {
